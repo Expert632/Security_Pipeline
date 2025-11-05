@@ -1,0 +1,48 @@
+name: 02 - Build and SAST
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with: node-version: 18
+      - name: Install deps and run npm audit (generate report)
+        run: |
+          cd app-node
+          npm ci
+          npm audit --json > ../npm_audit.json || true
+          cd ..
+      - name: Run semgrep (SAST) -> SARIF
+        uses: returntocorp/semgrep-action@v2
+        with:
+          config: auto
+          output: semgrep.sarif
+      - name: Upload semgrep to DefectDojo
+        uses: ivanamat/defectdojo-import-scan@v1
+        with:
+          dojo_url: ${{ secrets.DEFECTDOJO_URL }}
+          api_key: ${{ secrets.DEFECTDOJO_API_KEY }}
+          engagement: ${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}
+          product: ${{ secrets.DEFECTDOJO_PRODUCT_ID }}
+          scan_type: "Semgrep SARIF"
+          file: semgrep.sarif
+      - name: Fail on critical findings in semgrep
+        run: |
+          python3 - <<'PY'
+import json,sys
+data=json.load(open('semgrep.sarif'))
+crit=0
+for r in data.get('runs',[]):
+  for res in r.get('results',[]):
+    sev=res.get('properties',{}).get('metadata',{}).get('severity','').lower()
+    if sev=='critical':
+      crit+=1
+if crit>0:
+  print("Semgrep criticals:",crit); sys.exit(1)
+print("No semgrep criticals")
+PY
