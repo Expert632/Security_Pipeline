@@ -1,0 +1,51 @@
+name: 03 - IaC + OPA (Conftest)
+on:
+  push:
+    paths:
+      - 'infra/**'
+
+jobs:
+  iac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install conftest
+        run: |
+          wget https://github.com/open-policy-agent/conftest/releases/latest/download/conftest_linux_amd64.tar.gz -O conftest.tar.gz
+          tar xvf conftest.tar.gz
+          sudo mv conftest /usr/local/bin/
+      - name: Run terraform fmt & init
+        run: |
+          cd infra
+          terraform init -backend=false || true
+          terraform fmt -check || true
+      - name: Run conftest (Rego policies)
+        run: |
+          conftest test -p policies/rego infra/ || true
+        continue-on-error: true
+      - name: Convert conftest output to JSON (if any) and upload
+        run: |
+          # conftest does not output SARIF by default; we produce a simple JSON report
+          conftest test -o json -p policies/rego infra/ > conftest.json || true
+      - name: Upload conftest.json to DefectDojo
+        uses: portswigger-cloud/defectdojo-import-scan@v1
+        with:
+          dojo_url: ${{ secrets.DEFECTDOJO_URL }}
+          api_key: ${{ secrets.DEFECTDOJO_API_KEY }}
+          engagement: ${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}
+          product: ${{ secrets.DEFECTDOJO_PRODUCT_ID }}
+          scan_type: "Conftest JSON"
+          file: conftest.json
+      - name: Gate on critical policy failure
+        run: |
+          python3 - <<'PY'
+import json,sys
+j=json.load(open('conftest.json'))
+fails=0
+for r in j.get('results',[]):
+  if r.get('status','')!='PASS':
+    fails+=1
+if fails>0:
+  print("IaC policy fails:",fails); sys.exit(1)
+print("IaC OK")
+PY
