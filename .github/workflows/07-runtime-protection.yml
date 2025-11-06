@@ -1,0 +1,48 @@
+name: 10 - Global report email
+on:
+  workflow_dispatch:
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate critical findings summary
+        run: |
+          python3 - <<'PY'
+import os,json,requests
+DOJO=os.environ['DEFECTDOJO_URL']; KEY=os.environ['DEFECTDOJO_API_KEY']
+r=requests.get(f"{DOJO}/api/v2/findings/?severity=Critical", headers={"Authorization":"Token "+KEY})
+items=r.json().get('results',[])
+summary=[]
+for f in items:
+  summary.append({
+    "type": f.get('title') or f.get('vuln') or 'unknown',
+    "scanner": f.get('source', 'unknown'),
+    "remediated": f.get('mitigated', False)
+  })
+open('report.json','w').write(json.dumps(summary))
+print("Wrote report.json")
+PY
+        env:
+          DEFECTDOJO_URL: ${{ secrets.DEFECTDOJO_URL }}
+          DEFECTDOJO_API_KEY: ${{ secrets.DEFECTDOJO_API_KEY }}
+      - name: Send only the required info by email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.example.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "Critical vuln report"
+          to: "recipient@example.com"
+          from: "noreply@example.com"
+          body: |
+            $(
+              python3 - <<'PY'
+import json
+r=json.load(open('report.json'))
+# Produce lines like: "<type> | <scanner> | <remediated>"
+for it in r:
+  print(f"{it['type']} | {it['scanner']} | {'yes' if it['remediated'] else 'no'}")
+PY
+            )
