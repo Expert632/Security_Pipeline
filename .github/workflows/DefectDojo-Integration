@@ -1,0 +1,39 @@
+name: 08-DefectDojo-Integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * *'  # tous les jours à 8h
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Upload scan results to DefectDojo
+      run: |
+        for report in reports/*.json; do
+          curl -X POST "$DEFECTDOJO_URL/api/v2/import-scan/" \
+            -H "Authorization: Token $DEFECTDOJO_API_KEY" \
+            -F "file=@$report" \
+            -F "scan_type=$(basename $report .json)" \
+            -F "engagement=$ENGAGEMENT_ID" \
+            -F "active=true" \
+            -F "verified=true"
+        done
+
+    - name: Get critical vulnerabilities summary
+      run: |
+        curl -s -H "Authorization: Token $DEFECTDOJO_API_KEY" \
+          "$DEFECTDOJO_URL/api/v2/findings/?severity=Critical&active=true" \
+          | jq '.count' > critical_count.txt
+        echo "Critical vulnerabilities found: $(cat critical_count.txt)"
+
+    - name: Security Gate
+      if: ${{ steps.integrate.outputs.critical_count > 0 }}
+      run: |
+        echo "❌ Critical vulnerabilities detected. Blocking pipeline."
+        exit 1
