@@ -1,0 +1,39 @@
+name: 06 - K8s security scanning
+on:
+  workflow_dispatch:
+
+jobs:
+  k8s-sec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kube-bench
+        run: |
+          curl -LO https://github.com/aquasecurity/kube-bench/releases/latest/download/kube-bench_$(uname -s)_amd64.tar.gz
+          tar xzf kube-bench_* && sudo mv kube-bench /usr/local/bin/
+      - name: Run kube-bench
+        run: |
+          kube-bench --json > kube-bench.json || true
+      - name: Run kube-hunter (as docker)
+        run: |
+          docker run --rm aquasec/kube-hunter --json > kube-hunter.json || true
+      - name: Upload to DefectDojo
+        uses: portswigger-cloud/defectdojo-import-scan@v1
+        with:
+          dojo_url: ${{ secrets.DEFECTDOJO_URL }}
+          api_key: ${{ secrets.DEFECTDOJO_API_KEY }}
+          engagement: ${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}
+          product: ${{ secrets.DEFECTDOJO_PRODUCT_ID }}
+          scan_type: "KubeBench JSON"
+          file: kube-bench.json
+      - name: Gate: fail when kube-bench criticals present
+        run: |
+          python3 - <<'PY'
+import json,sys
+j=json.load(open('kube-bench.json'))
+crit=0
+for r in j.get('results',[]):
+  if r.get('score',0) < 1: crit+=1
+if crit>0: print("kube-bench fails:",crit); sys.exit(1)
+print("kube-bench OK")
+PY
