@@ -1,0 +1,52 @@
+name: 04 - Image & Container scan
+on:
+  push:
+    paths:
+      - 'app-node/**'
+      - 'app-python/**'
+      - 'Dockerfile'
+
+jobs:
+  image-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build docker image
+        run: |
+          docker build -t lab-node:latest app-node
+      - name: Scan image with Trivy (generate SARIF)
+        uses: aquasecurity/trivy-action@v2
+        with:
+          scan-type: image
+          image-ref: lab-node:latest
+          format: sarif
+          output: trivy-image.sarif
+      - name: Generate SBOM (syft)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          syft dir:app-node -o json > sbom.json || true
+      - name: Upload Trivy to DefectDojo
+        uses: portswigger-cloud/defectdojo-import-scan@v1
+        with:
+          dojo_url: ${{ secrets.DEFECTDOJO_URL }}
+          api_key: ${{ secrets.DEFECTDOJO_API_KEY }}
+          engagement: ${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}
+          product: ${{ secrets.DEFECTDOJO_PRODUCT_ID }}
+          scan_type: "Trivy SARIF"
+          file: trivy-image.sarif
+      - name: Gate: fail on trivy critical
+        run: |
+          python3 - <<'PY'
+import json,sys
+data=json.load(open('trivy-image.sarif'))
+crit=0
+for r in data.get('runs',[]):
+  for re in r.get('results',[]):
+    if re.get('level','').lower()=='error' or re.get('level','').lower()=='critical':
+      crit+=1
+if crit>0:
+  print("Trivy criticals:",crit); sys.exit(1)
+print("No trivy criticals.")
+PY
