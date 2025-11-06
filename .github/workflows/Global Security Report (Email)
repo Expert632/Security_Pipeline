@@ -1,0 +1,22 @@
+name: 10-Global-Security-Report
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["09-SOAR-AutoRemediation"]
+    types: [completed]
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Fetch latest vulnerability summary
+      run: |
+        curl -s -H "Authorization: Token $DEFECTDOJO_API_KEY" \
+          "$DEFECTDOJO_URL/api/v2/findings/?severity=Critical" \
+          > report.json
+
+    - name: Generate email summary
+      run: |
+        python3 scripts/email_report.py
