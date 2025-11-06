@@ -1,4 +1,5 @@
 name: 01 - Pre-commit checks
+
 on:
   push:
     branches: [ "main" ]
@@ -8,24 +9,31 @@ on:
 jobs:
   precommit:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v4
-        with: python-version: '3.11'
+        with:
+          python-version: '3.11'
+
       - name: Install bandit + sarif formatter
         run: |
           python -m pip install --upgrade pip
           pip install bandit bandit-sarif-formatter
+
       - name: Run bandit (SAST python) -> SARIF
         run: |
           bandit -r app-python -f sarif -o results-bandit.sarif || true
+
       - name: Run nodejs linter (npm audit disabled here for speed)
         run: |
           cd app-node || exit 0
           npm ci || true
           npm run test || true
           cd ..
+
       - name: Upload SARIF to DefectDojo
         uses: portswigger-cloud/defectdojo-import-scan@v1
         with:
@@ -35,20 +43,21 @@ jobs:
           product: ${{ secrets.DEFECTDOJO_PRODUCT_ID }}
           scan_type: "Bandit SARIF"
           file: results-bandit.sarif
+
       - name: Gate: fail if critical found
         id: gate
         run: |
           python3 - <<'PY'
-import json,sys
+import json, sys
 f='results-bandit.sarif'
 data=json.load(open(f))
 crit=0
-for r in data.get('runs',[]):
-  for r2 in r.get('results',[]):
-    if r2.get('level','').lower() in ('error','critical'):
-      crit+=1
-if crit>0:
-  print("CRITICAL findings:",crit)
-  sys.exit(1)
+for r in data.get('runs', []):
+    for r2 in r.get('results', []):
+        if r2.get('level','').lower() in ('error','critical'):
+            crit += 1
+if crit > 0:
+    print("CRITICAL findings:", crit)
+    sys.exit(1)
 print("No criticals")
 PY
