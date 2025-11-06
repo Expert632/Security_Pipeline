@@ -44,10 +44,10 @@ jobs:
           scan_type: "Bandit SARIF"
           file: results-bandit.sarif
 
-      - name: Gate: Fail if critical found
+      - name: Gate: fail if critical found
         id: gate
         run: |
-          python3 - <<'PY'
+          python3 -c "
 import json, sys
 f = 'results-bandit.sarif'
 data = json.load(open(f))
@@ -57,7 +57,7 @@ for run in data.get('runs', []):
         if result.get('level', '').lower() in ('error', 'critical'):
             crit += 1
 if crit > 0:
-    print("CRITICAL findings:", crit)
+    print(f'CRITICAL findings: {crit}')
     sys.exit(1)
-print("No criticals")
-PY
+print('No criticals')
+"
