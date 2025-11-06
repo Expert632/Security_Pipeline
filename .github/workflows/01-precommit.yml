@@ -1,4 +1,4 @@
-name: 01 - Pre-commit checks
+name: 03 - IaC OPA Checks
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     types: [opened, synchronize, reopened]
 
 jobs:
-  precommit:
+  iac-opa:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,38 +18,31 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install bandit + sarif formatter
+      - name: Install OPA and dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install bandit bandit-sarif-formatter
+          pip install opa
 
-      - name: Run bandit (SAST python) -> SARIF
+      - name: Run OPA policy checks
         run: |
-          bandit -r app-python -f sarif -o results-bandit.sarif || true
+          opa test policies/ tests/ || true
 
-      - name: Run nodejs linter (npm audit disabled here for speed)
-        run: |
-          cd app-node || exit 0
-          npm ci || true
-          npm run test || true
-          cd ..
-
-      - name: Upload SARIF to DefectDojo
+      - name: Upload OPA scan results to DefectDojo
         uses: portswigger-cloud/defectdojo-import-scan@v1
         with:
           dojo_url: ${{ secrets.DEFECTDOJO_URL }}
           api_key: ${{ secrets.DEFECTDOJO_API_KEY }}
           engagement: ${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}
           product: ${{ secrets.DEFECTDOJO_PRODUCT_ID }}
-          scan_type: "Bandit SARIF"
-          file: results-bandit.sarif
+          scan_type: "OPA Scan"
+          file: opa-results.sarif
 
-      - name: Gate: fail if critical found
+      - name: Gate: fail if critical policies violated
         id: gate
         run: |
           python3 - <<'PY'
 import json, sys
-f='results-bandit.sarif'
+f='opa-results.sarif'
 data=json.load(open(f))
 crit=0
 for r in data.get('runs', []):
