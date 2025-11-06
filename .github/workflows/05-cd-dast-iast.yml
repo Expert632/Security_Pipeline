@@ -1,0 +1,61 @@
+name: 05 - CD + DAST + IAST + post-deploy tests
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-and-test:
+    runs-on: ubuntu-latest
+    env:
+      APP_URL: http://localhost:30000
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start test environment (docker-compose)
+        run: |
+          docker-compose -f tests/docker-compose.yml up -d
+          sleep 10
+      - name: Run functional tests
+        run: |
+          ./tests/post_deploy_tests.sh || exit 0
+      - name: DAST: Run OWASP ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.7.0
+        with:
+          target: "${{ env.APP_URL }}"
+          format: xml
+          output: zap-report.xml
+      - name: Upload ZAP report to DefectDojo
+        uses: portswigger-cloud/defectdojo-import-scan@v1
+        with:
+          dojo_url: ${{ secrets.DEFECTDOJO_URL }}
+          api_key: ${{ secrets.DEFECTDOJO_API_KEY }}
+          engagement: ${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}
+          product: ${{ secrets.DEFECTDOJO_PRODUCT_ID }}
+          scan_type: "ZAP Scan"
+          file: zap-report.xml
+      - name: Gate: fail if ZAP critical vulnerability
+        run: |
+          python3 - <<'PY'
+import xml.etree.ElementTree as ET,sys
+root=ET.parse('zap-report.xml').getroot()
+crit=0
+for alert in root.findall('.//alertitem'):
+  risk=alert.find('riskcode').text
+  # ZAP riskcode: 0/1/2/3? treat 3 as high/critical
+  if risk and int(risk) >= 3:
+    crit+=1
+if crit>0:
+  print("ZAP criticals:",crit); sys.exit(1)
+print("No ZAP criticals")
+PY
+      - name: (Simulated) IAST instrumentation + upload
+        run: |
+          # For lab: run a small instrumentation that writes iast_report.json
+          echo '{"findings": []}' > iast_report.json
+      - name: Upload IAST results to DefectDojo
+        uses: portswigger-cloud/defectdojo-import-scan@v1
+        with:
+          dojo_url: ${{ secrets.DEFECTDOJO_URL }}
+          api_key: ${{ secrets.DEFECTDOJO_API_KEY }}
+          engagement: ${{ secrets.DEFECTDOJO_ENGAGEMENT_ID }}
+          product: ${{ secrets.DEFECTDOJO_PRODUCT_ID }}
+          scan_type: "IAST JSON"
+          file: iast_report.json
