@@ -1,0 +1,27 @@
+name: 09-SOAR-AutoRemediation
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["08-DefectDojo-Integration"]
+    types: [completed]
+
+jobs:
+  remediate:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Fetch critical vulnerabilities
+      run: |
+        curl -s -H "Authorization: Token $DEFECTDOJO_API_KEY" \
+        "$DEFECTDOJO_URL/api/v2/findings/?severity=Critical&active=true" > critical.json
+
+    - name: Auto Remediation
+      run: |
+        python3 scripts/auto_remediation.py critical.json
+
+    - name: Update DefectDojo status
+      run: |
+        curl -X PATCH "$DEFECTDOJO_URL/api/v2/findings/mark-remediated/" \
+        -H "Authorization: Token $DEFECTDOJO_API_KEY" \
+        -d '{"severity":"Critical"}'
